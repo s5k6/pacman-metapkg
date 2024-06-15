@@ -20,10 +20,28 @@ function ask_yN {
 
 
 if test -z "${1-}"; then
+    info 'Listing installed metapackages:'
+    if ! pacman -Q | grep -E '^metapkg_'; then
+        echo '(none)'
+    fi
+    exit
+fi
+
+debug=false
+if test "${1-}" = -d; then
+    debug=true;
+    shift
+fi
+
+if test -z "${1-}"; then
     err 'Need a metapackage description'
 fi
 
 name="${1}"
+
+
+
+# read dependencies from file
 
 if
     grep -Evx \
@@ -35,17 +53,19 @@ fi
 
 mapfile -t depends < <(grep -Ev '^#' "${name}" | sort -u)
 
-#printf "%s\n" "${depends[@]}"
-#exit
-
 if test "${#depends[@]}" -lt 1; then
     err 'No dependencies listed in file'
 fi
 
+if "${debug}"; then
+    info 'List of dependencies'
+    printf "%s\n" "${depends[@]}"
+fi
 
 
-version="$(stat -c%Y "${name}")"
-release="$(date +%s)"
+
+version="$(date '+%Y%m%d%H%M%S' -d@"$(stat -c%Y "${name}")")"
+release="$(date '+%Y%m%d%H%M%S')"
 packager="$(stat "${name}" -c '%U:%G')"
 
 tmp="$(mktemp -t -d metapkg.XXXXXXXX)"
@@ -57,8 +77,10 @@ info "Creating package"
 
 mkdir "${pkg}"
 
-#echo "${tmp}"
-#basename "${pkg}"
+if "${debug}"; then
+    echo "${tmp}"
+    basename "${pkg}"
+fi
 
 
 ### Package construction
@@ -84,8 +106,10 @@ arch = any
 
 } >"${pkg}/.PKGINFO"
 
-#info 'Listing .PKGINFO'
-#cat "${pkg}/.PKGINFO"
+if "${debug}"; then
+    info 'Listing .PKGINFO'
+    cat "${pkg}/.PKGINFO"
+fi
 
 
 # . MTREE
@@ -99,8 +123,10 @@ LANG=C bsdtar \
     .PKGINFO \
     | gzip -c -f -n > "${pkg}/.MTREE"
 
-#info 'Listing pkg dir content'
-#ls -lA "${pkg}"
+if "${debug}"; then
+    info 'Listing pkg dir content'
+    ls -lA "${pkg}"
+fi
 
 
 # Archive package
@@ -112,10 +138,10 @@ LANG=C bsdtar \
     .MTREE .PKGINFO \
     | zstd > "${pkg}.tar.zst"
 
-rm -r "${pkg}"
-
-#info 'Listing pkg archive content'
-#unzstd < "${pkg}.tar.zst" | bsdtar -tvf -
+if "${debug}"; then
+    info 'Listing pkg archive content'
+    unzstd < "${pkg}.tar.zst" | bsdtar -tvf -
+fi
 
 
 
@@ -127,10 +153,11 @@ if test "${#orphansPre[@]}" -gt 0; then
     warn "Found ${#orphansPre[@]} orphans on your system."
 fi
 
-pacman --noconfirm -U "${pkg}.tar.zst"
-
-#rm "${pkg}.tar.zst"
-
+if "${debug}"; then
+    pacman -U "${pkg}.tar.zst"
+else
+    pacman --noconfirm -U "${pkg}.tar.zst"
+fi
 
 
 # Look for newly introduced (not: all) orphans
@@ -146,12 +173,17 @@ fi
 
 
 # remove temporary directory
-rm -rf "${tmp}"
+if "${debug}"; then
+    warn "Keeping: ${tmp}"
+else
+    rm -rf "${tmp}"
+fi
 
 
-info Done
+info 'Done.  Some final remarks:'
 cat <<.
 Find orphans:          pacman -Qdtq
-Modify metapackage:    metapkg ${name}
+Update metapackage:    metapkg ${name}
 Uninstall metapackage: pacman -Rsn metapkg_${name}
 .
+
