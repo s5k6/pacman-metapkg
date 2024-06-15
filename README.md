@@ -70,9 +70,9 @@ now in the `pacman` database.  You may inspect it with
 Listing
 -------
 
-The installed meta packages all have the `metapkg_` underscore in
-their name.  This makes it easy to manage them with the usual tools.
-E.g., list the installed meta packages:
+The installed meta packages all have the `metapkg_` prefix in their
+name.  This makes it easy to manage them with the usual tools.  E.g.,
+list the installed meta packages:
 
     # pacman -Qsq '^metapkg_'
 
@@ -107,7 +107,7 @@ creating a newer meta package every time.
 Unfortunately, `pacman` does not trace dependencies being dropped by a
 (meta) package during updates.  I.e., if a package A-1.0 with
 dependency B would be updated to a new version A-2.0, which does not
-need B any more, than B would not be removed from the system, even if
+need B any more, then B would not be removed from the system, even if
 A-1.0 was its only dependee, and B was only installed as a dependency.
 Instead, B would remain as an orphan.  To catch this, `metapkg`
 observes new orphans introduced by a modified meta package, and offers

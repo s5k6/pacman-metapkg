@@ -196,7 +196,7 @@ mapfile -t orphansNew < <(
 
 if test "${#orphansNew[@]}" -gt 0; then
     warn 'This change newly orphaned a few packages'
-    pacman -Rsn "${orphansNew[@]}" || true
+    pacman -Rs "${orphansNew[@]}" || true
 fi
 
 
@@ -211,6 +211,7 @@ fi
 info 'Done.'
 cat <<.
 Update metapackage:    metapkg ${1}
-Uninstall metapackage: pacman -Rsn metapkg_${name}
+Uninstall metapackage: pacman -Rs metapkg_${name}
 .
+
 
