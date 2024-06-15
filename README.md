@@ -1,54 +1,36 @@
 
-TODO
-----
-
-  * Pacman fails to remove dropped dependencies.
-
-  * Requirement to run script as non-rrot, but install as root is
-    cumbersome.
-
-
-Pacman
-------
-
-From the following, omit the `-q` to get version information.
-
-  * List explicitly installed (-e) packages which additionally are not
-    required (-t) by other packages:
-
-        pacman -Qetq   # explicit
-
-  * List real orphans — packages that were installed as dependencies
-    (-d) but are no longer required (-t) by any installed package.
-
-        pacman -Qdtq   # orphans
-
-
 Metapackages
 ------------
 
-A metapackage is simply a list of dependencies, optinally with version
-constraints.
+A metapackage is simply a list of dependencies, optionally with
+version constraints.  Lines with a leading `#` are ignored.  Leading
+and trailing spaces are not allowed.
 
     $ cat example
 
-Creation of a metapackage (must be non-root):
+Running
 
-    $ ./mkmetapkg example
-    …
-    /tmp/metapkg/metapkg_example-1718459133-1718459366-any.pkg.tar.zst
+    # metapkg example
 
-**Note:** The packagename has a `metapkg_` prefix added to the package
-name.
+creates a temporary package named `metapkg_example` with no contents
+on its own, but using the given dependencies.
 
-The created package is almost empty.  Its version number is the mtime
-of the dependency list used, its release number is the mtime of
-packaging.
+The package is installed by `pacman -U` and then discarded.  It can be
+simply removed by
 
-Install the file using `pacman -U`, i.e.,
+    # pacman -Rsn metapkg_example
 
-    # pacman -U /tmp/metapkg/metapkg_example-1718459133-1718459366-any.pkg.tar.zst
+which is standard `pacman` procedure.
 
-**Note:** If dependencies are droppd from the metapackage, then they
-will not be uninstalled when upgrading the metapackage to a newer
-version or release.
+Its version number is the mtime of the dependency list used, its
+release number is the mtime of packaging.  So after modifying
+`example`, the selection of installed packages can be simply updated
+by running
+
+    # metapkg example
+
+again.
+
+Unfortunately, `pacman` does not trace dependencies being dropped by a
+package during updates.  To this end, `metapkg` observes new orphans
+being introduced by such an upgrade, and offers to remove them.

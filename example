@@ -1,2 +1,3 @@
+# these two packages are not related by official dependencies
 foot
-meson
+meson>1.0.0
