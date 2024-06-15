@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright 2024 Stefan Klinger <http://stefan-klinger.de>
 set -u -e -C
 shopt -s failglob
 
@@ -20,24 +21,49 @@ function ask_yN {
 
 
 if test -z "${1-}"; then
-    info 'Listing installed metapackages:'
-    if ! pacman -Q | grep -E '^metapkg_'; then
-        echo '(none)'
-    fi
+    cat <<'.'
+
+metapkg [-d] path/to/name
+
+    Install or update metapackage `metapkg_name` created from
+    dependencies listed in file `name`.
+
+    If `-d` is provided, print diagnostics and keep temporary files.
+
+Warning: See pacman(8), as the following hints may be outdated...
+
+pacman -Qsq '^metapkg_'     # List installed metapackages.
+pacman -Rs metapkg_name     # Remove package and unneeded dependencies.
+pacman -Qdtq                # List orphaned packages.
+pacman -Dq (--asdeps|--asexplicit) pkg...    # Set installation reason.
+
+.
     exit
 fi
 
+
+
 debug=false
-if test "${1-}" = -d; then
-    debug=true;
-    shift
+
+while test "${1:0:1}" = -; do
+
+    if test "${1-}" = -d; then
+        debug=true;
+        shift
+    else
+        err "Invalid argument: ${1}"
+    fi
+
+done
+
+
+
+if ! test -e "${1-}"; then
+    err 'Need a file listing dependencies'
 fi
 
-if test -z "${1-}"; then
-    err 'Need a metapackage description'
-fi
-
-name="${1}"
+depfile="${1}"
+name="${depfile##*/}"
 
 
 
@@ -46,12 +72,12 @@ name="${1}"
 if
     grep -Evx \
         '#.*|[a-z0-9@_+][a-z0-9@._+-]*(>[0-9.]*)?(<[0-9.]*)?' \
-        "${name}"
+        "${depfile}"
 then
     err 'Invalid lines in given file'
 fi
 
-mapfile -t depends < <(grep -Ev '^#' "${name}" | sort -u)
+mapfile -t depends < <(grep -Ev '^#' "${depfile}" | sort -u)
 
 if test "${#depends[@]}" -lt 1; then
     err 'No dependencies listed in file'
@@ -64,9 +90,10 @@ fi
 
 
 
-version="$(date '+%Y%m%d%H%M%S' -d@"$(stat -c%Y "${name}")")"
+version="$(date '+%Y%m%d%H%M%S' -d@"$(stat -c%Y "${depfile}")")"
 release="$(date '+%Y%m%d%H%M%S')"
-packager="$(stat "${name}" -c '%U:%G')"
+packager="$(stat "${depfile}" -c '%U:%G')"
+url="file://$(realpath "${depfile}")"
 
 tmp="$(mktemp -t -d metapkg.XXXXXXXX)"
 pkg="${tmp}/metapkg_${name}-${version}-${release}-any.pkg"
@@ -93,8 +120,8 @@ pkgname = metapkg_${name}
 pkgbase = metapkg_${name}
 xdata = pkgtype=pkg
 pkgver = ${version}-${release}
-pkgdesc = Dependencies for ${name}
-url =
+pkgdesc = Dependencies for: ${name}
+url = ${url}
 builddate = ${release}
 packager = ${packager}
 size = 0
@@ -160,6 +187,7 @@ else
 fi
 
 
+
 # Look for newly introduced (not: all) orphans
 
 mapfile -t orphansNew < <(
@@ -180,10 +208,9 @@ else
 fi
 
 
-info 'Done.  Some final remarks:'
+info 'Done.'
 cat <<.
-Find orphans:          pacman -Qdtq
-Update metapackage:    metapkg ${name}
+Update metapackage:    metapkg ${1}
 Uninstall metapackage: pacman -Rsn metapkg_${name}
 .
 
