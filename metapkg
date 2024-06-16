@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copyright 2024 Stefan Klinger <http://stefan-klinger.de>
-set -u -e -C
+set -u -e -C -o pipefail
 shopt -s failglob
 
 function err { echo $'\e[1;31m'"$@"$'\e[m' >&2; exit 1; }
@@ -23,12 +23,12 @@ function ask_yN {
 if test -z "${1-}"; then
     cat <<'.'
 
-metapkg [-d] path/to/name
+metapkg [-k] path/to/name
 
     Install or update metapackage `metapkg_name` created from
     dependencies listed in file `name`.
 
-    If `-d` is provided, print diagnostics and keep temporary files.
+    If `-k` is provided, print diagnostics and keep temporary files.
 
 Warning: See pacman(8), as the following hints may be outdated...
 
@@ -45,9 +45,10 @@ fi
 
 debug=false
 
+
 while test "${1:0:1}" = -; do
 
-    if test "${1-}" = -d; then
+    if test "${1-}" = -k; then
         debug=true;
         shift
     else
@@ -67,22 +68,39 @@ name="${depfile##*/}"
 
 
 
-# read dependencies from file
-
-if
-    grep -Evx \
-        '#.*|[a-z0-9@_+][a-z0-9@._+-]*(>[0-9.]*)?(<[0-9.]*)?' \
-        "${depfile}"
-then
-    err 'Invalid lines in given file'
+if test "${2-}"; then
+    err 'Sorry, one file at once please.'
 fi
 
-mapfile -t depends < <(grep -Ev '^#' "${depfile}" | sort -u)
 
+
+# Read dependencies from file
+
+# read file, cleanup comments and acceptable whitespace
+mapfile -t depends < <(
+    sed -E 's/^\s+//; /^#/d; s/\s+$//; /^$/d' "${depfile}" | sort -u
+)
+
+# terminate if nothing is listed
 if test "${#depends[@]}" -lt 1; then
     err 'No dependencies listed in file'
 fi
 
+# construct regular expression for package descriptions
+rePkgName='([a-z0-9@_+][a-z0-9@._+-]*)'
+reVersion='([0-9]+(:[0-9]+)?(\.[0-9]+)*[a-z_]*)'
+reConstraint="(=${reVersion}|(>=?${reVersion})?(<=?${reVersion})?)"
+reLine="${rePkgName}${reConstraint}?"
+
+# Complain about lines not matching $reLine, limit to 10
+if
+    grep -Evx "${reLine}" <( printf '%s\n' "${depends[@]}") \
+        | head -n10 >&2
+then
+    err 'Invalid input.'
+fi
+
+# print listing in debug mode
 if "${debug}"; then
     info 'List of dependencies'
     printf "%s\n" "${depends[@]}"
@@ -90,23 +108,20 @@ fi
 
 
 
+# Creating package contents
+
 version="$(date '+%Y%m%d%H%M%S' -d@"$(stat -c%Y "${depfile}")")"
-release="$(date '+%Y%m%d%H%M%S')"
+release=1
 packager="$(stat "${depfile}" -c '%U:%G')"
 url="file://$(realpath "${depfile}")"
 
 tmp="$(mktemp -t -d metapkg.XXXXXXXX)"
 pkg="${tmp}/metapkg_${name}-${version}-${release}-any.pkg"
-
-
-
-info "Creating package"
-
 mkdir "${pkg}"
 
 if "${debug}"; then
-    echo "${tmp}"
-    basename "${pkg}"
+    info "Creating package contents"
+    echo "${pkg}"
 fi
 
 
@@ -134,57 +149,54 @@ arch = any
 } >"${pkg}/.PKGINFO"
 
 if "${debug}"; then
-    info 'Listing .PKGINFO'
+    info .PKGINFO
     cat "${pkg}/.PKGINFO"
 fi
 
 
 # . MTREE
 
-LANG=C bsdtar \
-    -C "${pkg}" \
-    -cnf - \
-    --format=mtree \
-    --options='!all,use-set,type,uid,gid,mode,time,size,sha256,link' \
-    --null \
+LANG=C bsdtar -C "${pkg}" -c --format=mtree --owner 0 --group 0 \
     .PKGINFO \
     | gzip -c -f -n > "${pkg}/.MTREE"
 
 if "${debug}"; then
-    info 'Listing pkg dir content'
+    info .MTREE
+    gunzip < "${pkg}/.MTREE"
+    info 'Package directory content'
     ls -lA "${pkg}"
 fi
 
 
 # Archive package
 
-LANG=C bsdtar \
-    -C "${pkg}" \
-    -cnf - \
-    --no-fflags --no-read-sparse --null \
+LANG=C bsdtar -C "${pkg}" -c --owner 0 --group 0 --no-fflags --no-read-sparse \
     .MTREE .PKGINFO \
     | zstd > "${pkg}.tar.zst"
 
 if "${debug}"; then
-    info 'Listing pkg archive content'
+    info 'pkg archive content'
     unzstd < "${pkg}.tar.zst" | bsdtar -tvf -
 fi
 
 
 
-info 'Installing package'
+info "Installing $(basename "${pkg}")"
 
 mapfile -t orphansPre < <(pacman -Qdtq)
 
-if test "${#orphansPre[@]}" -gt 0; then
-    warn "Found ${#orphansPre[@]} orphans on your system."
+if "${debug}" && test "${#orphansPre[@]}" -gt 0; then
+    info "Found ${#orphansPre[@]} orphans on your system."
 fi
 
-if "${debug}"; then
+if test "${EUID}" -ne 0; then
+    warn 'Not running as root, only print targets.'
+    pacman -Up "${pkg}.tar.zst"
+elif "${debug}"; then
     pacman -U "${pkg}.tar.zst"
 else
     pacman --noconfirm -U "${pkg}.tar.zst"
-fi
+fi || warn "Pacman exit code $?"
 
 
 
@@ -195,8 +207,8 @@ mapfile -t orphansNew < <(
 )
 
 if test "${#orphansNew[@]}" -gt 0; then
-    warn 'This change newly orphaned a few packages'
-    pacman -Rs "${orphansNew[@]}" || true
+    warn 'This change newly orphaned one or more packages'
+    pacman -Rs "${orphansNew[@]}" || warn "Pacman exit code $?"
 fi
 
 
@@ -208,10 +220,10 @@ else
 fi
 
 
-info 'Done.'
+info 'Done'
 cat <<.
-Update metapackage:    metapkg ${1}
-Uninstall metapackage: pacman -Rs metapkg_${name}
+To update metapackage:    metapkg ${1}
+To uninstall metapackage: pacman -Rs metapkg_${name}
 .
 
 
