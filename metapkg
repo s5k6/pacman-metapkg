@@ -7,17 +7,6 @@ function err { echo $'\e[1;31m'"$@"$'\e[m' >&2; exit 1; }
 function warn { echo $'\e[1;35m'"$@"$'\e[m' >&2; }
 function info { echo $'\e[36m'"$@"$'\e[m'; }
 
-function ask_yN {
-    local answer=''
-    read -n 1 -s -p $'\e[34m'"$* [yN]"$'\e[m' answer
-    if test "${answer}" = y; then
-        info yes
-        return 0
-    fi
-    info no
-    return 1
-}
-
 
 
 if test -z "${1-}"; then
@@ -45,11 +34,10 @@ fi
 
 debug=false
 
+while test "${1-}" && test "${1:0:1}" = -; do
 
-while test "${1:0:1}" = -; do
-
-    if test "${1-}" = -k; then
-        debug=true;
+    if test "${1}" = -k; then
+        debug=true
         shift
     else
         err "Invalid argument: ${1}"
@@ -60,7 +48,7 @@ done
 
 
 if ! test -e "${1-}"; then
-    err 'Need a file listing dependencies'
+    err 'Need a file listing dependencies.'
 fi
 
 depfile="${1}"
@@ -114,18 +102,18 @@ version="$(date '+%Y%m%d%H%M%S' -d@"$(stat -c%Y "${depfile}")")"
 release=1
 packager="$(stat "${depfile}" -c '%U:%G')"
 url="file://$(realpath "${depfile}")"
+builddate="$(date '+%s')"
 
 tmp="$(mktemp -t -d metapkg.XXXXXXXX)"
-pkg="${tmp}/metapkg_${name}-${version}-${release}-any.pkg"
-mkdir "${pkg}"
 
 if "${debug}"; then
     info "Creating package contents"
-    echo "${pkg}"
+    echo "${tmp}"
 fi
 
 
-### Package construction
+
+# Package construction
 
 # .PKGINFO
 {
@@ -137,51 +125,52 @@ xdata = pkgtype=pkg
 pkgver = ${version}-${release}
 pkgdesc = Dependencies for: ${name}
 url = ${url}
-builddate = ${release}
+builddate = ${builddate}
 packager = ${packager}
 size = 0
 arch = any
 .
-
-    # FIXME quoting rules in that file?
     printf 'depend = %s\n' "${depends[@]}"
 
-} >"${pkg}/.PKGINFO"
+} >"${tmp}/.PKGINFO"
 
 if "${debug}"; then
     info .PKGINFO
-    cat "${pkg}/.PKGINFO"
+    cat "${tmp}/.PKGINFO"
 fi
 
 
 # . MTREE
 
-LANG=C bsdtar -C "${pkg}" -c --format=mtree --owner 0 --group 0 \
+LANG=C bsdtar -C "${tmp}" -c --format=mtree --owner 0 --group 0 \
     .PKGINFO \
-    | gzip -c -f -n > "${pkg}/.MTREE"
+    | gzip -c -f -n > "${tmp}/.MTREE"
 
 if "${debug}"; then
     info .MTREE
-    gunzip < "${pkg}/.MTREE"
+    gzip -d < "${tmp}/.MTREE"
     info 'Package directory content'
-    ls -lA "${pkg}"
+    ls -lA "${tmp}"
 fi
+
 
 
 # Archive package
 
-LANG=C bsdtar -C "${pkg}" -c --owner 0 --group 0 --no-fflags --no-read-sparse \
+pkg="${tmp}/metapkg_${name}-${version}-${release}-any.pkg.tar.gz"
+
+LANG=C bsdtar -C "${tmp}" -c --owner 0 --group 0 --no-fflags --no-read-sparse \
     .MTREE .PKGINFO \
-    | zstd > "${pkg}.tar.zst"
+    | gzip > "${pkg}"
 
 if "${debug}"; then
     info 'pkg archive content'
-    unzstd < "${pkg}.tar.zst" | bsdtar -tvf -
+    gzip -d < "${pkg}" | bsdtar -tvf -
 fi
 
 
 
-info "Installing $(basename "${pkg}")"
+info "Installing ${pkg##*/}"
 
 mapfile -t orphansPre < <(pacman -Qdtq)
 
@@ -191,11 +180,11 @@ fi
 
 if test "${EUID}" -ne 0; then
     warn 'Not running as root, only print targets.'
-    pacman -Up "${pkg}.tar.zst"
+    pacman -Up "${pkg}"
 elif "${debug}"; then
-    pacman -U "${pkg}.tar.zst"
+    pacman -U "${pkg}"
 else
-    pacman --noconfirm -U "${pkg}.tar.zst"
+    pacman --noconfirm -U "${pkg}"
 fi || warn "Pacman exit code $?"
 
 
@@ -222,8 +211,6 @@ fi
 
 info 'Done'
 cat <<.
-To update metapackage:    metapkg ${1}
-To uninstall metapackage: pacman -Rs metapkg_${name}
+To update:    metapkg ${1}
+To uninstall: pacman -Rs metapkg_${name}
 .
-
-
