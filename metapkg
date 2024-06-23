@@ -140,27 +140,13 @@ if "${debug}"; then
 fi
 
 
-# . MTREE
-
-LANG=C bsdtar -C "${tmp}" -c --format=mtree --owner 0 --group 0 \
-    .PKGINFO \
-    | gzip -c -f -n > "${tmp}/.MTREE"
-
-if "${debug}"; then
-    info .MTREE
-    gzip -d < "${tmp}/.MTREE"
-    info 'Package directory content'
-    ls -lA "${tmp}"
-fi
-
-
 
 # Archive package
 
 pkg="${tmp}/metapkg_${name}-${version}-${release}-any.pkg.tar.gz"
 
 LANG=C bsdtar -C "${tmp}" -c --owner 0 --group 0 --no-fflags --no-read-sparse \
-    .MTREE .PKGINFO \
+    .PKGINFO \
     | gzip > "${pkg}"
 
 if "${debug}"; then
