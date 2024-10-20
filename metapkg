@@ -18,6 +18,7 @@ metapkg [-k] path/to/name
     dependencies listed in file `name`.
 
     If `-k` is provided, print diagnostics and keep temporary files.
+    Also applies `namcap` packet analysis if installed.
 
 Warning: See pacman(8), as the following hints may be outdated...
 
@@ -133,6 +134,7 @@ arch = any
     printf 'depend = %s\n' "${depends[@]}"
 
 } >"${tmp}/.PKGINFO"
+chmod 644 "${tmp}/.PKGINFO"
 
 if "${debug}"; then
     info .PKGINFO
@@ -145,13 +147,40 @@ fi
 
 pkg="${tmp}/metapkg_${name}-${version}-${release}-any.pkg.tar.gz"
 
-LANG=C bsdtar -C "${tmp}" -c --owner 0 --group 0 --no-fflags --no-read-sparse \
+LANG=C bsdtar -C "${tmp}" -c \
+    --owner root --group root --no-fflags --no-read-sparse \
     .PKGINFO \
     | gzip > "${pkg}"
 
 if "${debug}"; then
     info 'pkg archive content'
     gzip -d < "${pkg}" | bsdtar -tvf -
+fi
+
+
+
+if "${debug}"; then
+    if type -p namcap >/dev/null; then
+        info 'Found `namcap`, using it.'
+
+        if namcap -edepends "${pkg}" > /dev/null; then
+            warn 'FIXME: update script, namcap understands `-edepends`'
+        fi
+
+        # I think a license is not applicable.  The device of the
+        # metapackage is only a vessel for other packages.
+        namcap -e license,licensepkg "${pkg}" \
+            | grep -v 'Dependency included, but may not be needed' || true
+
+    else
+        warn 'Arch Linux package analysis utility `namcap` not found.'
+        cat <<'.'
+| From the manual: “`namcap` is a package analysis utility that looks
+| for problems with Arch Linux packages or their PKGBUILD files.”
+| It's absence simply means that the metapackage is not validated
+| against a known ruleset.  This should still work.
+.
+    fi
 fi
 
 
